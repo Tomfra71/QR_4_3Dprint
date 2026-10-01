@@ -32,10 +32,19 @@ ROZMIAR_STOLU_X = 256.0
 ROZMIAR_STOLU_Y = 256.0
 ODSTEP_X = 21.0            # raster kolumn
 ODSTEP_Y = 29.0            # raster wierszy
-MAX_ROWS = 8
-MAX_COLS = 10
-MARGINES_LEWY = 10.0       # zapas od lewej krawędzi stołu
-MARGINES_DOLNY = 6.0       # zapas od przedniej krawędzi stołu (5-7 mm)
+KOLUMNY = 8                # siatka 8x8 = 64 miejsca, minus pola zajęte przez strefy niżej
+WIERSZE = 8
+# Siatka jest zawsze wyśrodkowana na stole – Bambu Studio i tak centruje
+# zaimportowane obiekty, więc wtedy nic się nie przesuwa.
+
+# --- STREFY ZAKAZANE (współrzędne stołu w mm: x0, y0, x1, y1; (0,0) = lewy przedni róg) ---
+# Pola siatki, na które wchodzi któraś strefa (z zapasem), zostają puste.
+# Pole sondy wykrywania zbijania się filamentu (szary prostokąt z tyłu stołu P2S).
+STREFA_SONDY = (152.0, 233.0, 215.0, 256.0)
+# Miejsce na wieżę czyszczącą (Prime Tower) – lewy tylny róg.
+# Po otwarciu pliku przeciągnij wieżę w to miejsce (środek wypisuje skrypt).
+STREFA_WIEZY = (36.0, 216.0, 62.0, 242.0)
+ZAPAS_OD_STREF = 2.0       # minimalny odstęp zawieszki od strefy w mm
 
 # --- EKSPORT ---
 # Plik 3MF: każda zawieszka to OSOBNY obiekt (2 części: biała baza + czarny kod).
@@ -257,20 +266,33 @@ NUMER_KONCOWY = NUMER_STARTOWY + ILE_SZTUK - 1
 print(f"Generowanie partii dla dyszy 0.4mm: {PREFIKS}{NUMER_STARTOWY:0{CYFRY_NUMERU}d} "
       f"do {PREFIKS}{NUMER_KONCOWY:0{CYFRY_NUMERU}d} ({ILE_SZTUK} sztuk)")
 
-pozycje = []
-col, row = 0, 0
-while len(pozycje) < ILE_SZTUK:
-    if not ((col == 0 or col == 1) and row >= 6):
-        pozycje.append((col, row))
-    row += 1
-    if row >= MAX_ROWS:
-        row = 0
-        col += 1
-        if col >= MAX_COLS and len(pozycje) < ILE_SZTUK:
-            break
+# Szerokość/wysokość jednej zawieszki (z obrysu bazy)
+(_bx0, _by0, _), (_bx1, _by1, _) = stworz_baze().bounds
+SZEROKOSC_SIATKI = (KOLUMNY - 1) * ODSTEP_X + (_bx1 - _bx0)
+WYSOKOSC_SIATKI = (WIERSZE - 1) * ODSTEP_Y + (_by1 - _by0)
+MARGINES_LEWY = (ROZMIAR_STOLU_X - SZEROKOSC_SIATKI) / 2 - _bx0
+MARGINES_DOLNY = (ROZMIAR_STOLU_Y - WYSOKOSC_SIATKI) / 2 - _by0
 
-if len(pozycje) < ILE_SZTUK:
-    raise SystemExit(f"BŁĄD: na stole mieści się tylko {len(pozycje)} sztuk – zmniejsz ILE_SZTUK.")
+
+def koliduje(col, row, strefa):
+    x0 = col * ODSTEP_X + MARGINES_LEWY + _bx0 - ZAPAS_OD_STREF
+    y0 = row * ODSTEP_Y + MARGINES_DOLNY + _by0 - ZAPAS_OD_STREF
+    x1 = col * ODSTEP_X + MARGINES_LEWY + _bx1 + ZAPAS_OD_STREF
+    y1 = row * ODSTEP_Y + MARGINES_DOLNY + _by1 + ZAPAS_OD_STREF
+    sx0, sy0, sx1, sy1 = strefa
+    return x0 < sx1 and sx0 < x1 and y0 < sy1 and sy0 < y1
+
+
+# Wypełnianie wierszami od przodu stołu, od lewej do prawej
+wolne_pola = [
+    (col, row)
+    for row in range(WIERSZE)
+    for col in range(KOLUMNY)
+    if not koliduje(col, row, STREFA_SONDY) and not koliduje(col, row, STREFA_WIEZY)
+]
+if len(wolne_pola) < ILE_SZTUK:
+    raise SystemExit(f"BŁĄD: na stole mieści się tylko {len(wolne_pola)} sztuk – zmniejsz ILE_SZTUK.")
+pozycje = wolne_pola[:ILE_SZTUK]
 
 zawieszki = []   # (nazwa, baza, kody, (x, y)) – siatki w układzie lokalnym zawieszki
 
@@ -327,6 +349,12 @@ print(f"\nStół {ROZMIAR_STOLU_X:.0f}x{ROZMIAR_STOLU_Y:.0f} mm")
 print(f"  Zawieszki zajmują: X {bx0:.1f}..{bx1:.1f}, Y {by0:.1f}..{by1:.1f} mm")
 if bx1 > ROZMIAR_STOLU_X or by1 > ROZMIAR_STOLU_Y:
     print("  UWAGA: siatka wychodzi poza stół!")
+print(f"  Środek zawieszek: X={(bx0 + bx1) / 2:.1f}, Y={(by0 + by1) / 2:.1f} mm")
+if abs((bx0 + bx1) - ROZMIAR_STOLU_X) > 0.1 or abs((by0 + by1) - ROZMIAR_STOLU_Y) > 0.1:
+    print("  UWAGA: zawieszki nie wypełniają całej siatki, Bambu Studio może je przesunąć.")
+    print("         Wtedy zaznacz wszystkie (Ctrl+A) i wpisz powyższy środek w 'Manipulacja obiektem'.")
+wx0, wy0, wx1, wy1 = STREFA_WIEZY
+print(f"  Miejsce na wieżę czyszczącą: środek X={(wx0 + wx1) / 2:.1f}, Y={(wy0 + wy1) / 2:.1f} mm")
 
 print("\nGotowe! Wyeksportowano plik:")
 print(f"  - {nazwa_3mf} ({ILE_SZTUK} osobnych obiektów, każdy = baza + kod)")
@@ -338,6 +366,7 @@ print(f"2. Każda zawieszka jest osobnym obiektem ({PREFIKS}...) z dwiema częś
 print(f"   '_baza' → filament {FILAMENT_BAZY} (biały), '_kod' → filament {FILAMENT_KODOW} (czarny).")
 print("   Sprawdź tylko, czy w AMS sloty filamentów odpowiadają kolorom.")
 print("3. Pozycje są zapisane w pliku – NIE używaj 'Auto arrange' / klawisza 'A'.")
+print("   Przeciągnij wieżę czyszczącą (Prime Tower) na puste pole w lewym tylnym rogu.")
 print("4. Slajsuj i drukuj. W razie problemu z jedną zawieszką: na drukarce lub w Bambu")
 print("   Handy/Studio wybierz 'Skip objects' i zaznacz uszkodzony obiekt (nazwa = numer).")
 print("   Dolny tekst jest lustrzany (będzie czytelny po odwróceniu gotowej zawieszki).")
