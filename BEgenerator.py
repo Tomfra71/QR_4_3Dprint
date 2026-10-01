@@ -3,7 +3,8 @@ import zipfile
 import trimesh
 import qrcode
 import numpy as np
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon, Point, box
+from shapely.ops import unary_union
 from PIL import Image, ImageDraw, ImageFont
 
 # --- USTAWIENIA PARTII ---
@@ -72,6 +73,28 @@ def stworz_baze():
     return trimesh.creation.extrude_polygon(zewnetrzny.difference(otwor), height=GRUBOSC_BAZY)
 
 
+def piksele_na_bryle(maska, rozmiar_kostki):
+    """
+    Zamienia mapę pikseli na jedną czystą bryłę o wysokości ZAGLEBIENIE_KODU.
+    Sąsiednie piksele są scalane w wspólne obrysy (shapely), dzięki czemu siatka
+    jest szczelna i bez krawędzi non-manifold. Piksel (r, c) leży w
+    x = c..c+1, y = -(r+1)..-r (w jednostkach rozmiar_kostki).
+    """
+    kwadraty = [
+        box(c * rozmiar_kostki, -(r + 1) * rozmiar_kostki,
+            (c + 1) * rozmiar_kostki, -r * rozmiar_kostki)
+        for r, wiersz in enumerate(maska)
+        for c, v in enumerate(wiersz) if v
+    ]
+    # Minimalne poszerzenie (0.005 mm) łączy piksele stykające się tylko narożnikiem –
+    # inaczej powstałyby "przewężenia" w jednym punkcie, też non-manifold.
+    ksztalt = unary_union(kwadraty).buffer(0.005, join_style="mitre")
+    wielokaty = ksztalt.geoms if hasattr(ksztalt, "geoms") else [ksztalt]
+    return trimesh.util.concatenate([
+        trimesh.creation.extrude_polygon(w, height=ZAGLEBIENIE_KODU) for w in wielokaty
+    ])
+
+
 def stworz_qr_3d(tekst):
     """QR jako płaski zestaw prostopadłościanów (nie lustrzany)"""
     qr = qrcode.QRCode(version=1, box_size=1, border=0)
@@ -80,17 +103,7 @@ def stworz_qr_3d(tekst):
     matrix = qr.get_matrix()
 
     rozmiar_kostki = 0.8   # 2 ścieżki × 0.4 mm
-    kostki = [
-        trimesh.creation.box(extents=[rozmiar_kostki, rozmiar_kostki, ZAGLEBIENIE_KODU])
-        .apply_transform(trimesh.transformations.translation_matrix([
-            c * rozmiar_kostki + rozmiar_kostki / 2,
-            -r * rozmiar_kostki - rozmiar_kostki / 2,
-            ZAGLEBIENIE_KODU / 2
-        ]))
-        for r, wiersz in enumerate(matrix)
-        for c, v in enumerate(wiersz) if v
-    ]
-    return trimesh.util.concatenate(kostki), 16.8
+    return piksele_na_bryle(matrix, rozmiar_kostki), 16.8
 
 
 def stworz_tekst_pixelowy(tekst):
@@ -118,17 +131,7 @@ def stworz_tekst_pixelowy(tekst):
     max_rozmiar = 16.8
     rozmiar_kostki = min(max_rozmiar / (w + 2), max_rozmiar / (h + 2))
 
-    kostki = [
-        trimesh.creation.box(extents=[rozmiar_kostki, rozmiar_kostki, ZAGLEBIENIE_KODU])
-        .apply_transform(trimesh.transformations.translation_matrix([
-            c * rozmiar_kostki + rozmiar_kostki / 2,
-            -r * rozmiar_kostki - rozmiar_kostki / 2,
-            ZAGLEBIENIE_KODU / 2
-        ]))
-        for r, wiersz in enumerate(np.array(img))
-        for c, v in enumerate(wiersz) if v
-    ]
-    return trimesh.util.concatenate(kostki), (w + 2) * rozmiar_kostki, (h + 2) * rozmiar_kostki
+    return piksele_na_bryle(np.array(img), rozmiar_kostki), (w + 2) * rozmiar_kostki, (h + 2) * rozmiar_kostki
 
 
 def _siatka_xml(mesh, obj_id):
@@ -314,7 +317,6 @@ for idx, i in enumerate(range(NUMER_STARTOWY, NUMER_KONCOWY + 1)):
     t_mod.apply_transform(trimesh.transformations.translation_matrix([t_x, t_y, Z_KODU_BOTTOM]))
 
     kody = trimesh.util.concatenate([q, t_mod])
-    kody.merge_vertices()
 
     # Układ lokalny zawieszki: środek bazy w XY, spód na Z=0.
     # Pozycja na stole trafia do transformacji obiektu w 3MF.
