@@ -369,6 +369,8 @@ print(f"   '_baza' → filament {FILAMENT_BAZY} (biały), '_kod' → filament {F
 print("   Sprawdź tylko, czy w AMS sloty filamentów odpowiadają kolorom.")
 print("3. Pozycje są zapisane w pliku – NIE używaj 'Auto arrange' / klawisza 'A'.")
 print("   Przeciągnij wieżę czyszczącą (Prime Tower) na puste pole w lewym tylnym rogu.")
+print("   Zawieszki do prania (ASA): oba filamenty ASA, wypełnienie 100% (Proces → Siła),")
+print("   stół 100°C, drzwiczki i pokrywa zamknięte – wtedy w środku nie ma pustek na wodę i chemię.")
 print("4. Slajsuj i drukuj. W razie problemu z jedną zawieszką: na drukarce lub w Bambu")
 print("   Handy/Studio wybierz 'Skip objects' i zaznacz uszkodzony obiekt (nazwa = numer).")
 print("   Dolny tekst jest lustrzany (będzie czytelny po odwróceniu gotowej zawieszki).")
